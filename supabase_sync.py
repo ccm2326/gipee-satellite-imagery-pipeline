@@ -15,7 +15,7 @@ def has_credentials() -> bool:
     return bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_KEY"))
 
 
-def upload_and_insert(path: Path, capture_date: str, vegetation_index: float, water_stress_index: float):
+def upload_and_insert(path: Path, capture_date: str):
     from supabase import create_client
 
     url = os.environ["SUPABASE_URL"]
@@ -33,8 +33,6 @@ def upload_and_insert(path: Path, capture_date: str, vegetation_index: float, wa
         "site_id": SITE_ID,
         "capture_date": capture_date,
         "satellite_provider": SATELLITE_PROVIDER,
-        "vegetation_index": vegetation_index,
-        "water_stress_index": water_stress_index,
         "image_resolution": IMAGE_RESOLUTION,
         "imagery_path": imagery_path,
     }
@@ -43,15 +41,13 @@ def upload_and_insert(path: Path, capture_date: str, vegetation_index: float, wa
     return row
 
 
-def print_preview(capture_date: str, vegetation_index: float, water_stress_index: float):
+def print_preview(capture_date: str):
     print("\n[preview mode] SUPABASE_URL / SUPABASE_SERVICE_KEY not set.")
     print("Row that would be inserted into satellite_imagery:")
     row = {
         "site_id": SITE_ID,
         "capture_date": capture_date,
         "satellite_provider": SATELLITE_PROVIDER,
-        "vegetation_index": vegetation_index,
-        "water_stress_index": water_stress_index,
         "image_resolution": IMAGE_RESOLUTION,
     }
     for k, v in row.items():

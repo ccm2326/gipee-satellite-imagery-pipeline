@@ -1,3 +1,4 @@
+import re
 import sys
 from pathlib import Path
 
@@ -6,9 +7,20 @@ import rasterio
 from dotenv import load_dotenv
 
 import supabase_sync
-from indices import compute_indices
+from indices import DST_CRS, EC_INTERCEPT, EC_SLOPE, compute_ec
 
 load_dotenv()
+
+DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_B3\.tif$")
+
+
+def discover_dates(input_dir: str) -> list[str]:
+    dates = []
+    for path in sorted(Path(input_dir).glob("*_B3.tif")):
+        match = DATE_RE.match(path.name)
+        if match:
+            dates.append(match.group(1))
+    return dates
 
 
 def write_cog(date: str, computed: dict) -> Path:
@@ -18,46 +30,44 @@ def write_cog(date: str, computed: dict) -> Path:
         "nodata": np.nan,
         "width": computed["dst_width"],
         "height": computed["dst_height"],
-        "count": 2,
-        "crs": "EPSG:4326",
+        "count": 1,
+        "crs": DST_CRS,
         "transform": computed["dst_transform"],
         "compress": "DEFLATE",
         "overview_resampling": "nearest",
     }
 
-    output = Path(f"results/indices_{date}.tif")
+    output = Path(f"results/{date}_ec.tif")
     output.parent.mkdir(exist_ok=True)
     with rasterio.open(output, "w", **profile) as dst:
-        dst.write(computed["rvi"], 1)
-        dst.write(computed["r_nir_g"], 2)
-        dst.set_band_description(1, "RVI (B8/B4)")
-        dst.set_band_description(2, "R*NIR/G ((B4*B8)/B3)")
+        dst.write(computed["ec"], 1)
+        dst.set_band_description(1, f"Electrical conductivity estimate: EC = {EC_SLOPE}*SI5 + ({EC_INTERCEPT})")
 
     return output
 
 
 def run(date: str, input_dir: str):
-    computed = compute_indices(date, input_dir)
+    computed = compute_ec(date, input_dir)
     output = write_cog(date, computed)
 
-    valid_rvi = computed["rvi"][~np.isnan(computed["rvi"])]
-    valid_rng = computed["r_nir_g"][~np.isnan(computed["r_nir_g"])]
-    avg_rvi = float(valid_rvi.mean())
-    avg_rng = float(valid_rng.mean())
-
-    print(f"Saved to {output} ({output.stat().st_size / 1024:.1f} KB)")
-    print(f"  RVI mean:         {avg_rvi:.4f}")
-    print(f"  R*NIR/G mean:     {avg_rng:.4f}")
+    print(f"{date}: saved to {output} ({output.stat().st_size / 1024:.1f} KB)")
 
     if supabase_sync.has_credentials():
-        supabase_sync.upload_and_insert(output, date, avg_rvi, avg_rng)
+        supabase_sync.upload_and_insert(output, date)
     else:
-        supabase_sync.print_preview(date, avg_rvi, avg_rng)
+        supabase_sync.print_preview(date)
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print("venv/bin/python process_satellite_imagery.py <date:YYYY-MM-DD> <input_dir>")
+        print("venv/bin/python process_satellite_imagery.py <date:YYYY-MM-DD|all> <input_dir>")
         sys.exit(1)
 
-    run(sys.argv[1], sys.argv[2])
+    date_arg, input_dir = sys.argv[1], sys.argv[2]
+    dates = discover_dates(input_dir) if date_arg == "all" else [date_arg]
+    if not dates:
+        print(f"No *_B3.tif files found in {input_dir}")
+        sys.exit(1)
+
+    for date in dates:
+        run(date, input_dir)
